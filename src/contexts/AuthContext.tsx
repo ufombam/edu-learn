@@ -10,7 +10,7 @@ interface AuthContextType {
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: AuthError | null }>;
+  signUp: (email: string, password: string, fullName: string, role?: 'student' | 'mentor') => Promise<{ error: AuthError | null }>;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, fullName: string) => {
+  const signUp = async (email: string, password: string, fullName: string, role: 'student' | 'mentor' = 'student') => {
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -84,11 +84,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .insert({
           id: data.user.id,
           full_name: fullName,
-          role: 'student',
+          role,
         });
 
       if (profileError) {
         console.error('Error creating profile:', profileError);
+      }
+
+      if (role === 'mentor') {
+        const { error: mentorError } = await supabase
+          .from('mentor_profiles')
+          .insert({
+            id: data.user.id,
+            specializations: [],
+            bio: '',
+            is_available: true,
+            rating_average: 0,
+            total_sessions: 0,
+          });
+
+        if (mentorError) {
+          console.error('Error creating mentor profile:', mentorError);
+        }
       }
 
       return { error: null };

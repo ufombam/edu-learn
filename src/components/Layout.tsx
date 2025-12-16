@@ -27,7 +27,7 @@ export function Layout({ children }: LayoutProps) {
     { name: 'Dashboard', href: '/', icon: Home },
     { name: 'Courses', href: '/courses', icon: Library },
     { name: 'Mentors', href: '/mentors', icon: Users },
-    { name: 'Messages', href: '/chat', icon: MessageSquare },
+    { name: 'Messages', href: '/messages', icon: MessageSquare },
   ];
 
   if (profile?.role === 'admin') {

@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Users, GraduationCap } from 'lucide-react';
 
 export function RegisterPage() {
   const { signUp } = useAuth();
@@ -8,6 +8,7 @@ export function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [role, setRole] = useState<'student' | 'mentor'>('student');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,7 @@ export function RegisterPage() {
 
     setLoading(true);
 
-    const { error } = await signUp(email, password, fullName);
+    const { error } = await signUp(email, password, fullName, role);
 
     if (error) {
       setError(error.message);
@@ -75,9 +76,39 @@ export function RegisterPage() {
         <h1 className="text-3xl font-bold text-center text-gray-900 mb-2">
           Create Account
         </h1>
-        <p className="text-center text-gray-600 mb-8">
+        <p className="text-center text-gray-600 mb-6">
           Start your learning journey today
         </p>
+
+        <div className="mb-6 space-y-3">
+          <label className="block text-sm font-medium text-gray-700">Join as:</label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setRole('student')}
+              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition ${
+                role === 'student'
+                  ? 'border-blue-600 bg-blue-50'
+                  : 'border-gray-200 bg-white hover:border-gray-300'
+              }`}
+            >
+              <GraduationCap className="w-6 h-6 mb-2" />
+              <span className="font-medium text-sm">Student</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole('mentor')}
+              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition ${
+                role === 'mentor'
+                  ? 'border-blue-600 bg-blue-50'
+                  : 'border-gray-200 bg-white hover:border-gray-300'
+              }`}
+            >
+              <Users className="w-6 h-6 mb-2" />
+              <span className="font-medium text-sm">Mentor</span>
+            </button>
+          </div>
+        </div>
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">

@@ -171,7 +171,7 @@ export function MentorDirectory() {
                   <span>Book Session</span>
                 </button>
                 <button
-                  onClick={() => window.location.href = '/chat'}
+                  onClick={() => window.location.href = '/messages'}
                   className="flex items-center justify-center bg-gray-100 text-gray-700 p-2 rounded-lg hover:bg-gray-200 transition"
                 >
                   <MessageSquare className="w-5 h-5" />

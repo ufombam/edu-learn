@@ -12,6 +12,8 @@ import { ProfilePage } from '../pages/profile/ProfilePage';
 import { AdminDashboard } from '../pages/admin/AdminDashboard';
 import { AdminCourseManagement } from '../pages/admin/AdminCourseManagement';
 import { CourseCreation } from '../pages/admin/CourseCreation';
+import { MessagesPage } from '../pages/messages/MessagesPage';
+import { MentorSetup } from '../pages/mentor/MentorSetup';
 
 function Router() {
   const { user, profile, loading } = useAuth();
@@ -39,6 +41,11 @@ function Router() {
     return <AdminDashboard />;
   }
 
+  if (profile?.role === 'mentor' && path === '/mentor/setup') {
+    return <MentorSetup />;
+  }
+
+  if (path === '/messages') return <MessagesPage />;
   if (path === '/courses') return <CourseCatalog />;
   if (path.startsWith('/course/')) {
     const courseId = path.split('/')[2];
