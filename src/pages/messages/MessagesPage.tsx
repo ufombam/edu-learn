@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Layout } from '../../components/Layout';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { seedDummyMessages } from '../../utils/dummyMessages';
 import { Send, Paperclip, Plus, Search, MessageCircle, User } from 'lucide-react';
 
 interface Conversation {
@@ -48,10 +49,16 @@ export function MessagesPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
 
   useEffect(() => {
-    loadConversations();
+    const initializeMessages = async () => {
+      if (user) {
+        await seedDummyMessages(supabase, user.id);
+        loadConversations();
+      }
+    };
+    initializeMessages();
     const interval = setInterval(loadConversations, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (selectedConversation) {
