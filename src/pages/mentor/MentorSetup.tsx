@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
 import { ArrowRight, Plus, X } from 'lucide-react';
 
 export function MentorSetup() {
-  const { user, profile, updateProfile } = useAuth();
+  const { user, updateProfile } = useAuth();
   const [bio, setBio] = useState('');
   const [specializations, setSpecializations] = useState<string[]>([]);
   const [newSpecialization, setNewSpecialization] = useState('');
@@ -15,19 +15,15 @@ export function MentorSetup() {
 
   useEffect(() => {
     loadMentorProfile();
-  }, []);
+  }, [user]);
 
   const loadMentorProfile = async () => {
     if (!user) return;
 
     try {
-      const { data, error } = await supabase
-        .from('mentor_profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+      // Assuming GET /api/mentors/profile returns the profile for current user
+      const { data } = await api.get('/mentors/profile');
 
-      if (error) throw error;
       if (data) {
         setBio(data.bio || '');
         setSpecializations(data.specializations || []);
@@ -55,17 +51,12 @@ export function MentorSetup() {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('mentor_profiles')
-        .update({
-          bio,
-          specializations,
-          is_available: isAvailable,
-          hourly_rate: hourlyRate ? parseFloat(hourlyRate.toString()) : null,
-        })
-        .eq('id', user.id);
-
-      if (error) throw error;
+      await api.put('/mentors/profile', {
+        bio,
+        specializations,
+        is_available: isAvailable,
+        hourly_rate: hourlyRate ? parseFloat(hourlyRate.toString()) : null,
+      });
 
       await updateProfile({ bio } as any);
       window.location.href = '/';

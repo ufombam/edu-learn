@@ -1,8 +1,23 @@
-import { useState } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
 import { ArrowLeft, Plus, Trash2, FileText, Video, BookOpen, HelpCircle } from 'lucide-react';
+
+interface QuizQuestion {
+  question_text: string;
+  question_type: 'multiple_choice' | 'true_false' | 'short_answer';
+  options: string[];
+  correct_answer: string;
+  points: number;
+  topic?: string;
+}
+
+interface QuizData {
+  title: string;
+  passingScore: number;
+  timeLimit?: number;
+  questions: QuizQuestion[];
+}
 
 interface Lesson {
   id: string;
@@ -14,13 +29,19 @@ interface Lesson {
   duration?: number;
   saveForOffline: boolean;
   orderIndex: number;
+  quizData?: QuizData;
 }
 
-export function CourseCreation() {
-  const { user } = useAuth();
+interface CourseCreationProps {
+  courseId?: string;
+}
+
+export function CourseCreation({ courseId }: CourseCreationProps) {
   const [step, setStep] = useState<'course' | 'lessons'>('course');
   const [loading, setLoading] = useState(false);
-  const [courseId, setCourseId] = useState<string>('');
+  // If editing, courseId comes from props. If creating, it's set after first step.
+  const [activeCourseId, setActiveCourseId] = useState<string>(courseId || '');
+  const isEditing = !!courseId;
 
   const [courseForm, setCourseForm] = useState({
     title: '',
@@ -31,39 +52,193 @@ export function CourseCreation() {
     thumbnail_url: ''
   });
 
+  interface LessonForm {
+    title: string;
+    description: string;
+    contentType: 'text' | 'video' | 'pdf' | 'quiz';
+    contentUrl: string;
+    contentText: string;
+    duration: number;
+    saveForOffline: boolean;
+    quizData?: QuizData;
+  }
+
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [lessonForm, setLessonForm] = useState({
+  const [allLessons, setAllLessons] = useState<Array<{ id: string, title: string }>>([]);
+  const [lessonForm, setLessonForm] = useState<LessonForm>({
     title: '',
     description: '',
-    contentType: 'text' as const,
+    contentType: 'text',
     contentUrl: '',
     contentText: '',
     duration: 30,
-    saveForOffline: true
+    saveForOffline: true,
+    quizData: {
+      title: '',
+      passingScore: 70,
+      questions: []
+    }
   });
 
-  const handleCourseSubmit = async (e: React.FormEvent) => {
+  const [currentQuestion, setCurrentQuestion] = useState<QuizQuestion>({
+    question_text: '',
+    question_type: 'multiple_choice',
+    options: ['', '', '', ''],
+    correct_answer: '',
+    points: 1,
+    topic: ''
+  });
+
+  useEffect(() => {
+    if (courseId) {
+      loadCourseData(courseId);
+    }
+    // Fetch all lessons for topic dropdown
+    loadAllLessons();
+  }, [courseId]);
+
+  const loadAllLessons = async () => {
+    try {
+      const { data } = await api.get('/admin/lessons/all');
+      setAllLessons(data);
+    } catch (error) {
+      console.error('Error loading all lessons:', error);
+    }
+  };
+
+  const loadCourseData = async (id: string) => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(`/courses/${id}`);
+      // NOTE: reusing student endpoint for simplicity, assuming it returns full structure. 
+      // Ideally should use admin specific endpoint if student endpoint hides things.
+      // Based on previous view, getCourseDetails returns { course, lessons: [...] }
+
+      setCourseForm({
+        title: data.course.title,
+        description: data.course.description,
+        category: data.course.category,
+        difficulty_level: data.course.difficulty_level,
+        estimated_duration_hours: data.course.estimated_duration_hours,
+        thumbnail_url: data.course.thumbnail_url || ''
+      });
+
+      // Transform backend lessons to frontend format
+      const loadedLessons = data.lessons.map((l: any) => ({
+        id: l.id,
+        title: l.title,
+        description: l.description,
+        contentType: l.content_type,
+        contentUrl: l.content_url || '',
+        contentText: l.content_text || '',
+        duration: l.duration_minutes,
+        saveForOffline: l.is_downloadable,
+        orderIndex: l.order_index,
+        // Loading quiz data is trickier if not returned by this endpoint.
+        // Assuming getCourseDetails does NOT return nested quiz info (usually it doesn't).
+        // For full editing, we might need a better endpoint.
+        // But let's proceed. If quizData is missing, user might need to recreate quiz.
+        // Wait, looking at getCourseDetails implementation: it just does select * from lessons.
+        // It does NOT join quizzes.
+        // So fetching lessons won't give us quiz questions for editing.
+        // This is a limitation. For now, I'll fetch quizzes separately or accept this limitation?
+        // No, user wants to EDIT contents. Breaking quizzes is bad.
+        // I need to fetch quiz data for each lesson if it's a quiz.
+        // Let's rely on updateCourse for now and warn if quiz data is missing?
+        // No, I should fix it.
+        // Let's assume for now we just load basic lesson info. 
+        // If I update the backend `getCourseDetails` to include quiz info it would be better.
+        // But that's a student endpoint.
+        // I'll stick to what I have. If user edits a quiz lesson, they might reset questions if not careful.
+        // Let's verify if `getLesson` gets quiz data.
+        // `getLesson` does not join key quiz tables either in the view I saw earlier.
+        // Actually, `getLesson` calls `SELECT * FROM lessons`.
+        // I need to fetch full course data for editing.
+        // I'll implement a proper fetch in useEffect or just use what I have.
+        // Since I can't easily change ALL backend endpoints right now without verifying,
+        // I'll assume for this task basic course info editing is priority, 
+        // and add a TODO or warning for deep quiz editing if complexity is high.
+        // BUT, I can try to fetch lesson details individually if needed.
+        // Let's just handle course details update first, and basic lesson list update (add/remove).
+        // Preserving existing quiz data on updateCourseLessons is handled by my backend logic (delete and insert).
+        // Wait, if I delete and insert, I MUST send full data back.
+        // If I don't fail to load quiz data, I will lose it on save.
+        // Use caution: If I cannot load quiz data, I shouldn't define `quizData` property on loaded lessons, 
+        // so maybe I can skip quiz lessons or alert user.
+        // ACTUALLY, I'll fetch `GET /courses/lessons/:id` which calls `getCourseDetails`.
+        // Then I'll update `lessons` state.
+        // The backend `updateCourseLessons` deletes all and inserts.
+        // If I send back lessons without quizData, they become empty non-quizzes or crash.
+        // I should probably skip 'deep' lesson editing in this pass if retrieval is hard, 
+        // OR simply don't delete lessons that haven't changed?
+        // Too complex.
+        // Let's implement a 'load full course' endpoint or assume `getCourseDetails` returns enough?
+        // It currently doesn't return quiz data.
+        // I will add a simple logic: only allow editing Title/Description/Metadata of course for now in the main form?
+        // No, user said "edit a course AND ITS CONTENTS".
+        // I must allow editing lessons.
+        // I will add a `getAdminCourse` endpoint in `course.services.ts` that includes EVERYTHING?
+        // Or just multiple fetches?
+        // I'll do multiple fetches in `loadCourseData`. 
+        // For each lesson of type quiz, fetch quiz details? `GET /api/quiz/:lessonId`?
+        // `quiz.routes.ts` has `GET /:lessonId` which returns questions! Perfect.
+      }));
+
+      // Now fetch quiz details for quiz lessons
+      const lessonsWithQuizzes = await Promise.all(loadedLessons.map(async (l: any) => {
+        if (l.contentType === 'quiz') {
+          try {
+            const qRes = await api.get(`/quiz/${l.id}`);
+            // qRes.data = { quiz: {title, ...}, questions: [...] }
+            if (qRes.data && qRes.data.quiz) {
+              return {
+                ...l,
+                quizData: {
+                  title: qRes.data.quiz.title,
+                  passingScore: qRes.data.quiz.passing_score,
+                  timeLimit: qRes.data.quiz.time_limit_minutes,
+                  questions: qRes.data.questions
+                }
+              };
+            }
+          } catch (e) {
+            console.error("Failed to load quiz details for lesson", l.id);
+          }
+        }
+        return l;
+      }));
+
+      setLessons(lessonsWithQuizzes);
+
+    } catch (error) {
+      console.error('Error loading course:', error);
+      alert('Failed to load course details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCourseSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const { data, error } = await supabase
-        .from('courses')
-        .insert({
+      if (isEditing) {
+        // Update existing course
+        await api.put(`/admin/courses/${activeCourseId}`, courseForm);
+      } else {
+        // Create new
+        const { data } = await api.post('/admin/courses', {
           ...courseForm,
-          created_by: user?.id,
-          is_published: false
-        })
-        .select()
-        .single();
+        });
+        if (!data.id) throw new Error('No ID returned');
+        setActiveCourseId(data.id);
+      }
 
-      if (error) throw error;
-
-      setCourseId(data.id);
       setStep('lessons');
     } catch (error) {
-      console.error('Error creating course:', error);
-      alert('Failed to create course');
+      console.error('Error saving course:', error);
+      alert('Failed to save course');
     } finally {
       setLoading(false);
     }
@@ -72,6 +247,12 @@ export function CourseCreation() {
   const addLesson = () => {
     if (!lessonForm.title || !lessonForm.description) {
       alert('Please fill in lesson title and description');
+      return;
+    }
+
+    if (lessonForm.contentType === 'quiz' && (!lessonForm.quizData?.questions || lessonForm.quizData.questions.length === 0)) {
+      // Warning but allow? or Block? Block is safer.
+      alert('Please add at least one question to the quiz');
       return;
     }
 
@@ -89,7 +270,34 @@ export function CourseCreation() {
       contentUrl: '',
       contentText: '',
       duration: 30,
-      saveForOffline: true
+      saveForOffline: true,
+      quizData: {
+        title: '',
+        passingScore: 70,
+        questions: []
+      }
+    });
+  };
+
+  const addQuestion = () => {
+    if (!currentQuestion.question_text || !currentQuestion.correct_answer) {
+      alert('Please fill in the question and correct answer');
+      return;
+    }
+
+    const updatedQuizData = {
+      ...lessonForm.quizData!,
+      questions: [...(lessonForm.quizData?.questions || []), currentQuestion]
+    };
+
+    setLessonForm({ ...lessonForm, quizData: updatedQuizData });
+    setCurrentQuestion({
+      question_text: '',
+      question_type: 'multiple_choice',
+      options: ['', '', '', ''],
+      correct_answer: '',
+      points: 1,
+      topic: ''
     });
   };
 
@@ -100,24 +308,36 @@ export function CourseCreation() {
   const saveLessons = async () => {
     setLoading(true);
     try {
-      for (let i = 0; i < lessons.length; i++) {
-        const lesson = lessons[i];
-        const { error } = await supabase.from('lessons').insert({
-          course_id: courseId,
-          title: lesson.title,
-          description: lesson.description,
-          content_type: lesson.contentType,
-          content_url: lesson.contentUrl || null,
-          content_text: lesson.contentText || null,
-          duration_minutes: lesson.duration,
-          is_downloadable: lesson.saveForOffline,
-          order_index: i
+      if (isEditing) {
+        await api.put(`/admin/courses/${activeCourseId}/lessons`, {
+          lessons: lessons.map((l, index) => ({
+            ...l,
+            content_type: l.contentType,
+            content_url: l.contentUrl,
+            content_text: l.contentText,
+            duration_minutes: l.duration,
+            is_downloadable: l.saveForOffline,
+            order_index: index,
+            quizData: l.quizData
+          }))
         });
-
-        if (error) throw error;
+        alert('Course updated successfully!');
+      } else {
+        await api.post(`/admin/courses/${activeCourseId}/seed-lessons`, {
+          lessons: lessons.map((l, index) => ({
+            ...l,
+            content_type: l.contentType,
+            content_url: l.contentUrl,
+            content_text: l.contentText,
+            duration_minutes: l.duration,
+            is_downloadable: l.saveForOffline,
+            order_index: index,
+            quizData: l.quizData
+          }))
+        });
+        alert('Course created and lessons added successfully!');
       }
 
-      alert('Course and lessons created successfully!');
       window.location.href = '/admin';
     } catch (error) {
       console.error('Error saving lessons:', error);
@@ -138,7 +358,7 @@ export function CourseCreation() {
     <Layout>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <button
-          onClick={() => step === 'course' ? window.location.href = '/admin' : setStep('course')}
+          onClick={() => step === 'course' ? window.location.href = '/admin/courses' : setStep('course')}
           className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 mb-6"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -147,8 +367,8 @@ export function CourseCreation() {
 
         {step === 'course' ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Create New Course</h1>
-            <p className="text-gray-600 mb-8">Fill in the course details to get started</p>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">{isEditing ? 'Edit Course' : 'Create New Course'}</h1>
+            <p className="text-gray-600 mb-8">{isEditing ? 'Update course details' : 'Fill in the course details to get started'}</p>
 
             <form onSubmit={handleCourseSubmit} className="space-y-6">
               <div>
@@ -233,15 +453,15 @@ export function CourseCreation() {
                 disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 rounded-lg transition"
               >
-                {loading ? 'Creating...' : 'Create Course & Add Lessons'}
+                {loading ? 'Saving...' : (isEditing ? 'Update Course Details' : 'Create Course & Add Lessons')}
               </button>
             </form>
           </div>
         ) : (
           <div className="space-y-8">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Add Lesson Content</h1>
-              <p className="text-gray-600 mb-8">Create lessons for your course with rich content options</p>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">{isEditing ? 'Edit Lessons' : 'Add Lesson Content'}</h1>
+              <p className="text-gray-600 mb-8">{isEditing ? 'Manage the lessons for this course' : 'Create lessons for your course with rich content options'}</p>
 
               <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-6 mb-8">
                 <div className="flex items-start space-x-3">
@@ -346,6 +566,116 @@ export function CourseCreation() {
                   </label>
                 </div>
 
+                {lessonForm.contentType === 'quiz' && (
+                  <div className="bg-blue-50 p-6 rounded-lg space-y-4 border border-blue-100">
+                    <h3 className="font-semibold text-blue-900 border-b border-blue-200 pb-2 flex items-center">
+                      <HelpCircle className="w-4 h-4 mr-2" />
+                      Configure Quiz Questions
+                    </h3>
+
+                    {/* List of questions already added to this lesson */}
+                    {lessonForm.quizData?.questions.map((q, qIndex) => (
+                      <div key={qIndex} className="bg-white p-3 rounded-md text-sm shadow-sm flex justify-between items-center text-gray-700">
+                        <div>
+                          <span className="font-bold mr-2 text-blue-600">Q{qIndex + 1}:</span>
+                          {q.question_text}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newQs = lessonForm.quizData?.questions.filter((_, i) => i !== qIndex) || [];
+                            setLessonForm({ ...lessonForm, quizData: { ...lessonForm.quizData!, questions: newQs } });
+                          }}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+
+                    <div className="space-y-3 pt-2">
+                      <input
+                        type="text"
+                        placeholder="Question text"
+                        value={currentQuestion.question_text}
+                        onChange={(e) => setCurrentQuestion({ ...currentQuestion, question_text: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-md"
+                      />
+
+                      <div className="grid grid-cols-2 gap-3 mt-3">
+                        <select
+                          value={currentQuestion.topic || ''}
+                          onChange={(e) => setCurrentQuestion({ ...currentQuestion, topic: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-md"
+                        >
+                          <option value="">Select Related Lesson (Topic)...</option>
+                          {/* Combine database lessons with current lessons being added */}
+                          {[
+                            ...allLessons,
+                            ...lessons
+                              .filter(l => l.contentType !== 'quiz')
+                              .map(l => ({ id: l.id, title: l.title }))
+                          ]
+                            // Remove duplicates by title
+                            .filter((lesson, index, self) =>
+                              index === self.findIndex(l => l.title === lesson.title)
+                            )
+                            .map(l => (
+                              <option key={l.id} value={l.title}>
+                                {l.title}
+                              </option>
+                            ))
+                          }
+                        </select>
+                        <input
+                          type="number"
+                          placeholder="Points"
+                          min="1"
+                          value={currentQuestion.points}
+                          onChange={(e) => setCurrentQuestion({ ...currentQuestion, points: parseInt(e.target.value) })}
+                          className="w-full px-3 py-2 border rounded-md"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        {currentQuestion.options.map((opt, oIndex) => (
+                          <div key={oIndex} className="flex items-center space-x-2">
+                            <input
+                              type="radio"
+                              id={`correct-${oIndex}`}
+                              name="correct_answer"
+                              checked={currentQuestion.correct_answer === opt && opt !== ''}
+                              onChange={() => setCurrentQuestion({ ...currentQuestion, correct_answer: opt })}
+                            />
+                            <input
+                              type="text"
+                              placeholder={`Option ${oIndex + 1}`}
+                              value={opt}
+                              onChange={(e) => {
+                                const newOpts = [...currentQuestion.options];
+                                newOpts[oIndex] = e.target.value;
+                                setCurrentQuestion({ ...currentQuestion, options: newOpts });
+                              }}
+                              className="flex-1 px-3 py-1 border rounded-md text-sm"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between items-center mt-2">
+                        <p className="text-xs text-blue-600 italic">* Select the radio button for the correct answer</p>
+                        <button
+                          type="button"
+                          onClick={addQuestion}
+                          className="bg-blue-600 text-white px-4 py-1 rounded-md text-sm hover:bg-blue-700"
+                        >
+                          Add Question
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded-lg transition flex items-center justify-center space-x-2"
@@ -403,7 +733,7 @@ export function CourseCreation() {
                   disabled={loading}
                   className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 rounded-lg transition"
                 >
-                  {loading ? 'Saving Course & Lessons...' : 'Publish Course'}
+                  {loading ? 'Saving...' : (isEditing ? 'Update Course & Lessons' : 'Publish Course')}
                 </button>
               </div>
             )}

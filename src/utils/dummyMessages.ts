@@ -37,13 +37,7 @@ export const dummyMessageTexts = {
 
 export const generateDummyMessages = () => {
   const messages = [];
-  const topics = [
-    "Web Development",
-    "Advanced JavaScript",
-    "React Fundamentals",
-    "Database Design",
-    "API Development"
-  ];
+  // const topics = [ ... ]; // removed unused
 
   for (let i = 0; i < 40; i++) {
     const isStudent = i % 2 === 0;
@@ -60,52 +54,4 @@ export const generateDummyMessages = () => {
   return messages;
 };
 
-export const seedDummyMessages = async (supabase: any, userId: string) => {
-  try {
-    const { data: existingConversations } = await supabase
-      .from('chat_conversations')
-      .select('id')
-      .or(`created_by.eq.${userId},conversation_participants.user_id.eq.${userId}`)
-      .limit(1);
-
-    if (!existingConversations || existingConversations.length === 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, role')
-        .neq('id', userId)
-        .limit(1);
-
-      if (profiles && profiles.length > 0) {
-        const otherUser = profiles[0];
-
-        const { data: newConv, error: convError } = await supabase
-          .from('chat_conversations')
-          .insert({
-            type: 'direct',
-            created_by: userId,
-          })
-          .select()
-          .single();
-
-        if (!convError && newConv) {
-          await supabase.from('conversation_participants').insert([
-            { conversation_id: newConv.id, user_id: userId },
-            { conversation_id: newConv.id, user_id: otherUser.id },
-          ]);
-
-          const dummyMessages = generateDummyMessages();
-          for (const msg of dummyMessages) {
-            await supabase.from('chat_messages').insert({
-              conversation_id: newConv.id,
-              sender_id: msg.sender_role === 'student' ? userId : otherUser.id,
-              message_text: msg.message_text,
-              is_synced: true,
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error seeding dummy messages:', error);
-  }
-};
+// seedDummyMessages removed as it relied on Supabase

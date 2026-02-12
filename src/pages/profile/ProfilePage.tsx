@@ -1,18 +1,46 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { Layout } from '../../components/Layout';
 import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
 import { User, Mail, Phone, Globe, Wifi, Save } from 'lucide-react';
 
 export function ProfilePage() {
-  const { profile, updateProfile } = useAuth();
-  const [fullName, setFullName] = useState(profile?.full_name || '');
-  const [phoneNumber, setPhoneNumber] = useState(profile?.phone_number || '');
-  const [bio, setBio] = useState(profile?.bio || '');
-  const [languagePreference, setLanguagePreference] = useState(profile?.language_preference || 'en');
-  const [lowBandwidthMode, setLowBandwidthMode] = useState(profile?.low_bandwidth_mode || false);
+  const { user } = useAuth();
+  const [fullName, setFullName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [bio, setBio] = useState('');
+  const [languagePreference, setLanguagePreference] = useState('en');
+  const [lowBandwidthMode, setLowBandwidthMode] = useState(false);
+  const [role, setRole] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (user) {
+      setFullName(user.full_name || '');
+      setRole(user.role || '');
+      // Fetch extended profile data
+      loadProfile();
+    }
+  }, [user]);
+
+  const loadProfile = async () => {
+    try {
+      // Trying generic profile endpoint
+      const { data } = await api.get('/profile');
+      if (data) {
+        setPhoneNumber(data.phone_number || '');
+        setBio(data.bio || '');
+        setLanguagePreference(data.language_preference || 'en');
+        setLowBandwidthMode(data.low_bandwidth_mode || false);
+        if (data.full_name) setFullName(data.full_name);
+        if (data.role) setRole(data.role);
+      }
+    } catch (err) {
+      console.error('Failed to load profile details', err);
+    }
+  };
 
   const languages = [
     { code: 'en', name: 'English' },
@@ -27,22 +55,22 @@ export function ProfilePage() {
     setError('');
     setSuccess(false);
 
-    const { error: updateError } = await updateProfile({
-      full_name: fullName,
-      phone_number: phoneNumber,
-      bio,
-      language_preference: languagePreference,
-      low_bandwidth_mode: lowBandwidthMode
-    });
-
-    if (updateError) {
-      setError(updateError.message);
-    } else {
+    try {
+      await api.put('/profile', {
+        full_name: fullName,
+        phone_number: phoneNumber,
+        bio,
+        language_preference: languagePreference,
+        low_bandwidth_mode: lowBandwidthMode
+      });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Error updating profile:', err);
+      setError(err.response?.data?.message || 'Failed to update profile');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -60,8 +88,8 @@ export function ProfilePage() {
                 <User className="w-12 h-12 text-white" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">{profile?.full_name}</h2>
-                <p className="text-gray-600 capitalize">{profile?.role}</p>
+                <h2 className="text-2xl font-bold text-gray-900">{fullName}</h2>
+                <p className="text-gray-600 capitalize">{role}</p>
               </div>
             </div>
 
@@ -103,7 +131,7 @@ export function ProfilePage() {
                 </label>
                 <input
                   type="email"
-                  value={profile?.id || ''}
+                  value={user?.email || ''}
                   disabled
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
                 />
@@ -192,6 +220,16 @@ export function ProfilePage() {
                   <span>{loading ? 'Saving...' : 'Save Changes'}</span>
                 </button>
               </div>
+              {user?.role === 'mentor' && <div className="pt-6">
+                <button
+                  type="button"
+                  onClick={() => window.location.href = '/mentor/setup'}
+                  // disabled={loading}
+                  className="flex items-center space-x-2 bg-gray-600 text-white px-8 py-3 rounded-lg hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span>Edit Mentor Profile</span>
+                </button>
+              </div>}
             </form>
           </div>
         </div>

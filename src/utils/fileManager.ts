@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import api from '../lib/api';
 
 export interface FileUploadOptions {
   bucket: string;
@@ -21,35 +21,33 @@ export async function uploadFile(
     return { error: 'File type not allowed' };
   }
 
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${options.folder}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-
   try {
-    const { data, error } = await supabase.storage
-      .from(options.bucket)
-      .upload(fileName, file);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('bucket', options.bucket);
+    formData.append('folder', options.folder);
 
-    if (error) {
-      return { error: error.message };
-    }
-
-    const { data: urlData } = supabase.storage
-      .from(options.bucket)
-      .getPublicUrl(data.path);
+    // Assuming a backend endpoint for uploads exists
+    const { data } = await api.post('/storage/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
 
     return {
-      url: urlData.publicUrl,
+      url: data.url,
       path: data.path
     };
   } catch (error) {
+    console.error('Upload failed:', error);
     return { error: 'Upload failed' };
   }
 }
 
 export async function deleteFile(bucket: string, path: string): Promise<boolean> {
   try {
-    const { error } = await supabase.storage.from(bucket).remove([path]);
-    return !error;
+    await api.delete(`/storage/${bucket}/${path}`);
+    return true;
   } catch (error) {
     return false;
   }
@@ -141,16 +139,13 @@ export async function downloadForOffline(
   userId: string
 ): Promise<boolean> {
   try {
-    const { error } = await supabase
-      .from('offline_content')
-      .upsert({
-        user_id: userId,
-        content_type: contentType,
-        content_id: contentId,
-        downloaded_at: new Date().toISOString()
-      }, { onConflict: 'user_id,content_type,content_id' });
-
-    return !error;
+    await api.post('/offline-content', {
+      user_id: userId,
+      content_type: contentType,
+      content_id: contentId,
+      downloaded_at: new Date().toISOString()
+    });
+    return true;
   } catch (error) {
     console.error('Error marking content as offline:', error);
     return false;
@@ -159,28 +154,7 @@ export async function downloadForOffline(
 
 export async function syncOfflineData(userId: string): Promise<void> {
   try {
-    const { data: queueItems } = await supabase
-      .from('sync_queue')
-      .select('*')
-      .eq('user_id', userId)
-      .is('synced_at', null)
-      .order('created_at', { ascending: true });
-
-    if (!queueItems || queueItems.length === 0) return;
-
-    for (const item of queueItems) {
-      try {
-        await supabase
-          .from('sync_queue')
-          .update({
-            synced_at: new Date().toISOString(),
-            sync_attempts: item.sync_attempts + 1
-          })
-          .eq('id', item.id);
-      } catch (error) {
-        console.error('Error syncing item:', error);
-      }
-    }
+    await api.post('/sync/offline-data', { userId });
   } catch (error) {
     console.error('Error syncing offline data:', error);
   }

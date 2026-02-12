@@ -14,10 +14,10 @@ export function LoginPage() {
     setError('');
     setLoading(true);
 
-    const { error } = await signIn(email, password);
-
-    if (error) {
-      setError(error.message);
+    try {
+      await signIn(email, password);
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in');
     }
 
     setLoading(false);

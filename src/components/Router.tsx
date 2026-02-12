@@ -12,11 +12,12 @@ import { ProfilePage } from '../pages/profile/ProfilePage';
 import { AdminDashboard } from '../pages/admin/AdminDashboard';
 import { AdminCourseManagement } from '../pages/admin/AdminCourseManagement';
 import { CourseCreation } from '../pages/admin/CourseCreation';
-import { MessagesPage } from '../pages/messages/MessagesPage';
+import { UserManagement } from '../pages/admin/UserManagement';
+// import { MessagesPage } from '../pages/messages/MessagesPage';
 import { MentorSetup } from '../pages/mentor/MentorSetup';
 
 function Router() {
-  const { user, profile, loading } = useAuth();
+  const { user, loading } = useAuth();
   const path = window.location.pathname;
 
   if (loading) {
@@ -35,17 +36,22 @@ function Router() {
     return <LoginPage />;
   }
 
-  if (profile?.role === 'admin' && path.startsWith('/admin')) {
+  if (user?.role === 'admin' && path.startsWith('/admin')) {
     if (path === '/admin/courses') return <AdminCourseManagement />;
     if (path === '/admin/courses/new') return <CourseCreation />;
+    if (path.startsWith('/admin/courses/') && path.endsWith('/edit')) {
+      const courseId = path.split('/')[3];
+      return <CourseCreation courseId={courseId} />;
+    }
+    if (path === '/admin/users') return <UserManagement />;
     return <AdminDashboard />;
   }
 
-  if (profile?.role === 'mentor' && path === '/mentor/setup') {
+  if (user?.role === 'mentor' && path === '/mentor/setup') {
     return <MentorSetup />;
   }
 
-  if (path === '/messages') return <MessagesPage />;
+  if (path === '/messages') return <ChatPage />;
   if (path === '/courses') return <CourseCatalog />;
   if (path.startsWith('/course/')) {
     const courseId = path.split('/')[2];

@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Send, Search, MoreVertical, Paperclip } from 'lucide-react';
+import { Send, Search, MoreVertical, Paperclip, Calendar, Clock, Video, MessageSquare, Check } from 'lucide-react';
+import io from 'socket.io-client';
+import api from '../../lib/api';
 
 interface Conversation {
   id: string;
@@ -21,10 +22,12 @@ interface Message {
   message_text: string;
   sent_at: string;
   attachment_url: string | null;
+  message_type?: 'text' | 'session_booking';
+  metadata?: any;
 }
 
 export function ChatPage() {
-  const { profile } = useAuth();
+  const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -32,92 +35,72 @@ export function ChatPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<any>(null);
 
   useEffect(() => {
-    loadConversations();
+    // Initialize Socket.io
+    const socketUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    // Remove /api if present for socket connection usually
+    const baseUrl = socketUrl.replace(/\/api\/?$/, '');
+
+    socketRef.current = io(baseUrl, {
+      auth: {
+        token: localStorage.getItem('token')
+      }
+    });
+
+    socketRef.current.on('connect', () => {
+      console.log('Connected to chat server');
+    });
+
+    socketRef.current.on('new_message', (message: Message) => {
+      setMessages(prev => [...prev, message]);
+    });
+
+    socketRef.current.on('message_updated', (updated: { id: string, metadata: any }) => {
+      setMessages(prev => prev.map(msg =>
+        msg.id === updated.id ? { ...msg, metadata: { ...msg.metadata, ...updated.metadata } } : msg
+      ));
+    });
+
+    return () => {
+      socketRef.current.disconnect();
+    };
   }, []);
 
   useEffect(() => {
-    if (selectedConversation) {
-      loadMessages(selectedConversation);
-      subscribeToMessages(selectedConversation);
-    }
-  }, [selectedConversation]);
+    const params = new URLSearchParams(window.location.search);
+    const convId = params.get('conversationId');
+    loadConversations(convId);
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (selectedConversation) {
+      loadMessages(selectedConversation);
+      // Join conversation room
+      if (socketRef.current) {
+        socketRef.current.emit('join_conversation', selectedConversation);
+      }
+    }
+  }, [selectedConversation]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const loadConversations = async () => {
+  const loadConversations = async (convIdFromQuery?: string | null) => {
     try {
-      const { data: participantsData } = await supabase
-        .from('conversation_participants')
-        .select(`
-          conversation_id,
-          conversations:chat_conversations (
-            id,
-            type,
-            name
-          )
-        `)
-        .eq('user_id', profile?.id);
+      const { data } = await api.get('/chat/conversations');
+      setConversations(data);
 
-      if (participantsData && participantsData.length > 0) {
-        const conversationIds = participantsData.map(p => (p.conversations as any).id);
-
-        const { data: messagesData } = await supabase
-          .from('chat_messages')
-          .select('conversation_id, message_text, sent_at, sender_id')
-          .in('conversation_id', conversationIds)
-          .order('sent_at', { ascending: false });
-
-        const lastMessages = new Map();
-        messagesData?.forEach(msg => {
-          if (!lastMessages.has(msg.conversation_id)) {
-            lastMessages.set(msg.conversation_id, msg);
-          }
-        });
-
-        const { data: otherParticipants } = await supabase
-          .from('conversation_participants')
-          .select(`
-            conversation_id,
-            user_id,
-            profiles (
-              full_name
-            )
-          `)
-          .in('conversation_id', conversationIds)
-          .neq('user_id', profile?.id);
-
-        const otherUsers = new Map();
-        otherParticipants?.forEach(p => {
-          otherUsers.set(p.conversation_id, (p.profiles as any)?.full_name || 'Unknown');
-        });
-
-        const conversationsWithData = participantsData.map(p => {
-          const conv = p.conversations as any;
-          const lastMsg = lastMessages.get(conv.id);
-          return {
-            id: conv.id,
-            type: conv.type,
-            name: conv.name,
-            last_message: lastMsg?.message_text || 'No messages yet',
-            last_message_time: lastMsg?.sent_at || conv.created_at,
-            other_user_name: otherUsers.get(conv.id) || 'Unknown',
-            unread_count: 0
-          };
-        });
-
-        setConversations(conversationsWithData);
-
-        if (conversationsWithData.length > 0 && !selectedConversation) {
-          setSelectedConversation(conversationsWithData[0].id);
-        }
+      if (convIdFromQuery) {
+        setSelectedConversation(convIdFromQuery);
+      } else if (data.length > 0 && !selectedConversation) {
+        setSelectedConversation(data[0].id);
       }
     } catch (error) {
       console.error('Error loading conversations:', error);
@@ -128,74 +111,12 @@ export function ChatPage() {
 
   const loadMessages = async (conversationId: string) => {
     try {
-      const { data } = await supabase
-        .from('chat_messages')
-        .select(`
-          id,
-          sender_id,
-          message_text,
-          sent_at,
-          attachment_url,
-          profiles:sender_id (
-            full_name
-          )
-        `)
-        .eq('conversation_id', conversationId)
-        .order('sent_at', { ascending: true });
-
-      if (data) {
-        const formattedMessages = data.map(m => ({
-          id: m.id,
-          sender_id: m.sender_id,
-          sender_name: (m.profiles as any)?.full_name || 'Unknown',
-          message_text: m.message_text,
-          sent_at: m.sent_at,
-          attachment_url: m.attachment_url
-        }));
-        setMessages(formattedMessages);
-      }
+      const { data } = await api.get(`/chat/conversations/${conversationId}/messages`);
+      setMessages(data);
     } catch (error) {
       console.error('Error loading messages:', error);
+      // If messages fail to load, we still want to show the empty chat UI if it exists
     }
-  };
-
-  const subscribeToMessages = (conversationId: string) => {
-    const channel = supabase
-      .channel(`messages:${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `conversation_id=eq.${conversationId}`
-        },
-        (payload) => {
-          (async () => {
-            const { data: senderData } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', payload.new.sender_id)
-              .maybeSingle();
-
-            const newMsg: Message = {
-              id: payload.new.id,
-              sender_id: payload.new.sender_id,
-              sender_name: senderData?.full_name || 'Unknown',
-              message_text: payload.new.message_text,
-              sent_at: payload.new.sent_at,
-              attachment_url: payload.new.attachment_url
-            };
-
-            setMessages(prev => [...prev, newMsg]);
-          })();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   };
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -203,19 +124,50 @@ export function ChatPage() {
     if (!newMessage.trim() || !selectedConversation) return;
 
     try {
-      const { error } = await supabase
-        .from('chat_messages')
-        .insert({
-          conversation_id: selectedConversation,
-          sender_id: profile?.id!,
-          message_text: newMessage.trim()
-        });
+      const { data } = await api.post('/chat/messages', {
+        conversationId: selectedConversation,
+        messageText: newMessage.trim()
+      });
 
-      if (!error) {
-        setNewMessage('');
-      }
+      const newMsgObj: Message = {
+        id: data.id,
+        sender_id: user?.id!,
+        sender_name: 'Me',
+        message_text: newMessage.trim(),
+        sent_at: new Date().toISOString(),
+        attachment_url: null
+      };
+
+      setMessages(prev => [...prev, newMsgObj]);
+      setNewMessage('');
+
     } catch (error) {
       console.error('Error sending message:', error);
+    }
+  };
+
+  const handleConfirmSession = async (sessionId: string) => {
+    try {
+      await api.put(`/mentor-sessions/confirm/${sessionId}`);
+      loadMessages(selectedConversation!);
+    } catch (error) {
+      console.error('Error confirming session:', error);
+      alert('Failed to confirm session');
+    }
+  };
+
+  const handleRescheduleSession = async (sessionId: string) => {
+    const newDate = prompt('Enter new date and time (YYYY-MM-DD HH:MM):');
+    if (!newDate) return;
+
+    try {
+      await api.put(`/mentor-sessions/reschedule/${sessionId}`, {
+        newScheduledAt: new Date(newDate).toISOString()
+      });
+      loadMessages(selectedConversation!);
+    } catch (error) {
+      console.error('Error rescheduling session:', error);
+      alert('Failed to reschedule session');
     }
   };
 
@@ -267,9 +219,8 @@ export function ChatPage() {
                       <button
                         key={conv.id}
                         onClick={() => setSelectedConversation(conv.id)}
-                        className={`w-full p-4 text-left hover:bg-gray-50 transition ${
-                          selectedConversation === conv.id ? 'bg-blue-50' : ''
-                        }`}
+                        className={`w-full p-4 text-left hover:bg-gray-50 transition ${selectedConversation === conv.id ? 'bg-blue-50' : ''
+                          }`}
                       >
                         <div className="flex items-start space-x-3">
                           <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-green-500 rounded-full flex-shrink-0"></div>
@@ -279,7 +230,7 @@ export function ChatPage() {
                                 {conv.other_user_name}
                               </h3>
                               <span className="text-xs text-gray-500">
-                                {new Date(conv.last_message_time).toLocaleDateString()}
+                                {conv.last_message_time ? new Date(conv.last_message_time).toLocaleDateString() : ''}
                               </span>
                             </div>
                             <p className="text-sm text-gray-600 truncate">{conv.last_message}</p>
@@ -312,23 +263,79 @@ export function ChatPage() {
                     {messages.map(message => (
                       <div
                         key={message.id}
-                        className={`flex ${message.sender_id === profile?.id ? 'justify-end' : 'justify-start'}`}
+                        className={`flex ${message.sender_id === user?.id ? 'justify-end' : 'justify-start'}`}
                       >
-                        <div className={`max-w-md ${message.sender_id === profile?.id ? 'order-2' : 'order-1'}`}>
+                        <div className={`max-w-md ${message.sender_id === user?.id ? 'order-2' : 'order-1'}`}>
                           <div
-                            className={`px-4 py-2 rounded-2xl ${
-                              message.sender_id === profile?.id
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 text-gray-900'
-                            }`}
+                            className={`px-4 py-2 rounded-2xl ${message.sender_id === user?.id
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-100 text-gray-900'
+                              } ${message.message_type === 'session_booking' ? 'border-2 border-blue-200 bg-white !text-gray-900 shadow-sm' : ''}`}
                           >
-                            <p className="text-sm">{message.message_text}</p>
+                            {message.message_type === 'session_booking' ? (
+                              <div className="py-2">
+                                <div className="flex items-center space-x-2 text-blue-600 mb-3">
+                                  <Calendar className="w-5 h-5" />
+                                  <span className="font-bold">Session Booking Request</span>
+                                </div>
+                                <div className="space-y-2 mb-4">
+                                  <div className="flex items-center text-sm text-gray-700">
+                                    <Clock className="w-4 h-4 mr-2 text-gray-400" />
+                                    <span>
+                                      {message.metadata?.scheduledAt ? new Date(message.metadata.scheduledAt).toLocaleString() : 'N/A'}
+                                      {message.metadata?.duration ? ` (${message.metadata.duration} mins)` : ''}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center text-sm text-gray-700">
+                                    {message.metadata?.sessionType === 'video' ? (
+                                      <Video className="w-4 h-4 mr-2 text-gray-400" />
+                                    ) : (
+                                      <MessageSquare className="w-4 h-4 mr-2 text-gray-400" />
+                                    )}
+                                    <span className="capitalize">{message.metadata?.sessionType} Session</span>
+                                  </div>
+                                  {message.metadata?.notes && (
+                                    <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded italic">
+                                      "{message.metadata.notes}"
+                                    </div>
+                                  )}
+                                </div>
+
+                                {user?.role === 'mentor' && user.id === message.metadata?.mentorId && !message.metadata?.status && (
+                                  <div className="flex space-x-2 pt-2 border-t border-gray-100">
+                                    <button
+                                      onClick={() => handleConfirmSession(message.metadata.sessionId)}
+                                      className="flex-1 flex items-center justify-center space-x-1 bg-green-600 text-white py-1.5 rounded-lg text-sm font-medium hover:bg-green-700 transition"
+                                    >
+                                      <Check className="w-4 h-4" />
+                                      <span>Confirm</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleRescheduleSession(message.metadata.sessionId)}
+                                      className="flex-1 flex items-center justify-center space-x-1 bg-gray-100 text-gray-700 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-200 transition"
+                                    >
+                                      <Clock className="w-4 h-4" />
+                                      <span>Reschedule</span>
+                                    </button>
+                                  </div>
+                                )}
+
+                                {message.metadata?.status === 'confirmed' && (
+                                  <div className="flex items-center justify-center space-x-1 text-green-600 py-1 bg-green-50 rounded italic text-sm">
+                                    <Check className="w-4 h-4" />
+                                    <span>Session Confirmed</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-sm">{message.message_text}</p>
+                            )}
                           </div>
                           <p className="text-xs text-gray-500 mt-1 px-2">
-                            {new Date(message.sent_at).toLocaleTimeString([], {
+                            {message.sent_at ? new Date(message.sent_at).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit'
-                            })}
+                            }) : ''}
                           </p>
                         </div>
                       </div>

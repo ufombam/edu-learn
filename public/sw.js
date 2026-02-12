@@ -48,7 +48,14 @@ self.addEventListener('fetch', (event) => {
       }
 
       return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
+        // Allow caching 'basic' (same-origin) and 'cors' (API) responses
+        if (!response || response.status !== 200 || (response.type !== 'basic' && response.type !== 'cors')) {
+          return response;
+        }
+
+        // Do NOT cache API requests, especially auth/profile data
+        // Check if the request URL contains /api/
+        if (event.request.url.includes('/api/')) {
           return response;
         }
 

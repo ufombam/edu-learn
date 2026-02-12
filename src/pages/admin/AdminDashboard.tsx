@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
+// import { supabase } from '../../lib/supabase'; // Removed - CLEANED
 import { Users, BookOpen, MessageSquare, TrendingUp, Plus } from 'lucide-react';
 
 export function AdminDashboard() {
@@ -18,27 +19,13 @@ export function AdminDashboard() {
 
   const loadStats = async () => {
     try {
-      const { count: usersCount } = await supabase
-        .from('profiles')
-        .select('*', { count: 'exact', head: true });
-
-      const { count: coursesCount } = await supabase
-        .from('courses')
-        .select('*', { count: 'exact', head: true });
-
-      const { count: enrollmentsCount } = await supabase
-        .from('course_enrollments')
-        .select('*', { count: 'exact', head: true });
-
-      const { count: sessionsCount } = await supabase
-        .from('mentor_sessions')
-        .select('*', { count: 'exact', head: true });
+      const { data } = await api.get(`/stats/admin/stats?_t=${Date.now()}`);
 
       setStats({
-        totalUsers: usersCount || 0,
-        totalCourses: coursesCount || 0,
-        totalEnrollments: enrollmentsCount || 0,
-        totalSessions: sessionsCount || 0
+        totalUsers: data.totalUsers || 0,
+        totalCourses: data.totalCourses || 0,
+        totalEnrollments: data.totalEnrollments || 0,
+        totalSessions: data.totalSessions || 0
       });
     } catch (error) {
       console.error('Error loading stats:', error);

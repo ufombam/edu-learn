@@ -19,7 +19,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const path = window.location.pathname;
 
@@ -30,7 +30,7 @@ export function Layout({ children }: LayoutProps) {
     { name: 'Messages', href: '/messages', icon: MessageSquare },
   ];
 
-  if (profile?.role === 'admin') {
+  if (user?.role === 'admin') {
     navigation.push({ name: 'Admin', href: '/admin', icon: Settings });
   }
 
@@ -82,7 +82,7 @@ export function Layout({ children }: LayoutProps) {
                 className="flex items-center space-x-2 text-gray-700 hover:text-gray-900"
               >
                 <User className="w-5 h-5" />
-                <span className="font-medium">{profile?.full_name}</span>
+                <span className="font-medium">{user?.full_name}</span>
               </a>
               <button
                 onClick={signOut}

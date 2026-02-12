@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
+import api from '../../lib/api';
 import {
   BookOpen,
   Clock,
@@ -28,7 +28,7 @@ interface UpcomingSession {
 }
 
 export function StudentDashboard() {
-  const { profile } = useAuth();
+  const { user } = useAuth();
   const [enrolledCourses, setEnrolledCourses] = useState<EnrolledCourse[]>([]);
   const [upcomingSessions, setUpcomingSessions] = useState<UpcomingSession[]>([]);
   const [stats, setStats] = useState({
@@ -40,86 +40,34 @@ export function StudentDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadDashboardData();
-  }, []);
+    if (user) {
+      loadDashboardData();
+    }
+  }, [user]);
 
   const loadDashboardData = async () => {
     try {
-      const { data: enrollments } = await supabase
-        .from('course_enrollments')
-        .select(`
-          id,
-          progress_percentage,
-          last_accessed_at,
-          courses (
-            id,
-            title,
-            thumbnail_url
-          )
-        `)
-        .eq('student_id', profile?.id)
-        .order('last_accessed_at', { ascending: false })
-        .limit(4);
+      // Fetch Dashboard Data from API
+      // Assuming backend has /api/student/dashboard or similar aggregating endpoint
+      // OR individual endpoints.
 
-      if (enrollments) {
-        const courses = enrollments.map(e => ({
-          id: (e.courses as any).id,
-          title: (e.courses as any).title,
-          thumbnail_url: (e.courses as any).thumbnail_url,
-          progress_percentage: e.progress_percentage,
-          last_accessed_at: e.last_accessed_at
-        }));
-        setEnrolledCourses(courses);
+      // Fetch Dashboard Data from API
+      // Add timestamp to force fresh data load and bypass cache
+      const { data } = await api.get(`/student/dashboard?_t=${Date.now()}`);
 
-        const { count: totalCount } = await supabase
-          .from('course_enrollments')
-          .select('*', { count: 'exact', head: true })
-          .eq('student_id', profile?.id);
-
-        const { count: completedCount } = await supabase
-          .from('course_enrollments')
-          .select('*', { count: 'exact', head: true })
-          .eq('student_id', profile?.id)
-          .not('completed_at', 'is', null);
-
-        setStats(prev => ({
-          ...prev,
-          totalCourses: totalCount || 0,
-          completedCourses: completedCount || 0
-        }));
-      }
-
-      const { data: sessions } = await supabase
-        .from('mentor_sessions')
-        .select(`
-          id,
-          scheduled_at,
-          duration_minutes,
-          session_type,
-          mentor:mentor_profiles (
-            profiles (
-              full_name
-            )
-          )
-        `)
-        .eq('student_id', profile?.id)
-        .eq('status', 'scheduled')
-        .gte('scheduled_at', new Date().toISOString())
-        .order('scheduled_at', { ascending: true })
-        .limit(3);
-
-      if (sessions) {
-        const formattedSessions = sessions.map(s => ({
-          id: s.id,
-          scheduled_at: s.scheduled_at,
-          duration_minutes: s.duration_minutes,
-          session_type: s.session_type,
-          mentor_name: (s.mentor as any)?.profiles?.full_name || 'Unknown'
-        }));
-        setUpcomingSessions(formattedSessions);
+      if (data) {
+        setEnrolledCourses(data.enrolledCourses || []);
+        setUpcomingSessions(data.upcomingSessions || []);
+        setStats({
+          totalCourses: data.stats?.totalCourses || 0,
+          completedCourses: data.stats?.completedCourses || 0,
+          totalHours: data.stats?.totalHours || 0,
+          currentStreak: data.stats?.currentStreak || 0
+        });
       }
     } catch (error) {
       console.error('Error loading dashboard:', error);
+      // Fallback or empty state handling
     } finally {
       setLoading(false);
     }
@@ -140,7 +88,7 @@ export function StudentDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">
-            Welcome back, {profile?.full_name}!
+            Welcome back, {user?.full_name || user?.email || 'Student'}!
           </h1>
           <p className="text-gray-600 mt-2">
             Continue your learning journey where you left off

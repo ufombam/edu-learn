@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
+// import { useAuth } from '../../contexts/AuthContext';
 import { Search, Star, Calendar, Video, MessageSquare, Users } from 'lucide-react';
 
 interface Mentor {
@@ -10,13 +10,14 @@ interface Mentor {
   avatar_url: string | null;
   bio: string | null;
   specializations: string[];
-  rating_average: number;
+  rating_average: string;
   total_sessions: number;
   is_available: boolean;
+  hourly_rate: number | null;
 }
 
 export function MentorDirectory() {
-  const { profile } = useAuth();
+  // const { profile } = useAuth();
   const [mentors, setMentors] = useState<Mentor[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSpecialization, setSelectedSpecialization] = useState<string>('all');
@@ -32,33 +33,19 @@ export function MentorDirectory() {
 
   const loadMentors = async () => {
     try {
-      const { data } = await supabase
-        .from('mentor_profiles')
-        .select(`
-          id,
-          specializations,
-          bio,
-          rating_average,
-          total_sessions,
-          is_available,
-          profiles (
-            full_name,
-            avatar_url
-          )
-        `)
-        .eq('is_available', true)
-        .order('rating_average', { ascending: false });
+      const { data } = await api.get('/mentors'); // Routes to /api/mentors/ via server.ts -> mentor.routes.ts
 
       if (data) {
-        const formattedMentors = data.map(m => ({
+        const formattedMentors = data.map((m: any) => ({
           id: m.id,
-          full_name: (m.profiles as any)?.full_name || 'Unknown',
-          avatar_url: (m.profiles as any)?.avatar_url,
+          full_name: m.full_name || 'Unknown',
+          avatar_url: m.avatar_url,
           bio: m.bio,
-          specializations: m.specializations,
-          rating_average: m.rating_average,
-          total_sessions: m.total_sessions,
-          is_available: m.is_available
+          specializations: m.specializations || [],
+          rating_average: m.rating_average || 0,
+          total_sessions: m.total_sessions || 0,
+          is_available: m.is_available,
+          hourly_rate: m.hourly_rate
         }));
         setMentors(formattedMentors);
       }
@@ -138,7 +125,7 @@ export function MentorDirectory() {
                   <div className="flex items-center space-x-1 mb-2">
                     <Star className="w-4 h-4 text-yellow-500 fill-current" />
                     <span className="text-sm font-semibold text-gray-700">
-                      {mentor.rating_average.toFixed(1)}
+                      {Number(mentor.rating_average || 0).toFixed(1)}
                     </span>
                     <span className="text-sm text-gray-500">
                       ({mentor.total_sessions} sessions)
@@ -171,7 +158,18 @@ export function MentorDirectory() {
                   <span>Book Session</span>
                 </button>
                 <button
-                  onClick={() => window.location.href = '/messages'}
+                  onClick={async () => {
+                    try {
+                      const { data } = await api.post('/chat/conversations/direct', {
+                        participantId: mentor.id
+                      });
+                      window.location.href = `/messages?conversationId=${data.id}`;
+                    } catch (error: any) {
+                      console.error('Error starting conversation:', error);
+                      alert(error.response?.data?.message || 'Failed to start conversation. Redirecting to messages...');
+                      window.location.href = '/messages';
+                    }
+                  }}
                   className="flex items-center justify-center bg-gray-100 text-gray-700 p-2 rounded-lg hover:bg-gray-200 transition"
                 >
                   <MessageSquare className="w-5 h-5" />
@@ -208,7 +206,7 @@ interface BookingModalProps {
 }
 
 function BookingModal({ mentor, onClose }: BookingModalProps) {
-  const { profile } = useAuth();
+  // const { profile } = useAuth();
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [duration, setDuration] = useState(60);
@@ -224,23 +222,24 @@ function BookingModal({ mentor, onClose }: BookingModalProps) {
     try {
       const scheduledAt = new Date(`${date}T${time}`).toISOString();
 
-      const { error } = await supabase
-        .from('mentor_sessions')
-        .insert({
-          student_id: profile?.id!,
-          mentor_id: mentor.id,
-          scheduled_at: scheduledAt,
-          duration_minutes: duration,
-          session_type: sessionType,
-          session_notes: notes
-        });
+      const { data } = await api.post('/mentor-sessions', {
+        mentorId: mentor.id,
+        scheduledAt: scheduledAt,
+        duration: duration,
+        sessionType: sessionType,
+        notes: notes
+      });
 
-      if (!error) {
-        setSuccess(true);
-        setTimeout(() => onClose(), 2000);
-      }
-    } catch (error) {
+      setSuccess(true);
+      setTimeout(() => {
+        onClose();
+        if (data.conversationId) {
+          window.location.href = `/messages?conversationId=${data.conversationId}`;
+        }
+      }, 2000);
+    } catch (error: any) {
       console.error('Error booking session:', error);
+      alert(error.response?.data?.message || 'Failed to book session. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -310,11 +309,10 @@ function BookingModal({ mentor, onClose }: BookingModalProps) {
               <button
                 type="button"
                 onClick={() => setSessionType('video')}
-                className={`flex items-center justify-center space-x-2 py-3 rounded-lg border-2 transition ${
-                  sessionType === 'video'
-                    ? 'border-blue-600 bg-blue-50 text-blue-600'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                }`}
+                className={`flex items-center justify-center space-x-2 py-3 rounded-lg border-2 transition ${sessionType === 'video'
+                  ? 'border-blue-600 bg-blue-50 text-blue-600'
+                  : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                  }`}
               >
                 <Video className="w-5 h-5" />
                 <span>Video</span>
@@ -322,11 +320,10 @@ function BookingModal({ mentor, onClose }: BookingModalProps) {
               <button
                 type="button"
                 onClick={() => setSessionType('chat')}
-                className={`flex items-center justify-center space-x-2 py-3 rounded-lg border-2 transition ${
-                  sessionType === 'chat'
-                    ? 'border-blue-600 bg-blue-50 text-blue-600'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                }`}
+                className={`flex items-center justify-center space-x-2 py-3 rounded-lg border-2 transition ${sessionType === 'chat'
+                  ? 'border-blue-600 bg-blue-50 text-blue-600'
+                  : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                  }`}
               >
                 <MessageSquare className="w-5 h-5" />
                 <span>Chat</span>

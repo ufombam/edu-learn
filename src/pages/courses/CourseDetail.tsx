@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
 import { Clock, BookOpen, CheckCircle, Circle, Play, FileText, Video } from 'lucide-react';
 
 interface Lesson {
@@ -28,7 +27,6 @@ interface CourseDetailProps {
 }
 
 export function CourseDetail({ courseId }: CourseDetailProps) {
-  const { profile } = useAuth();
   const [course, setCourse] = useState<Course | null>(null);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [progress, setProgress] = useState(0);
@@ -40,58 +38,19 @@ export function CourseDetail({ courseId }: CourseDetailProps) {
 
   const loadCourseDetails = async () => {
     try {
-      const { data: courseData } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('id', courseId)
-        .maybeSingle();
+      const { data } = await api.get(`/courses/${courseId}`);
 
-      if (courseData) {
-        setCourse(courseData);
+      // Backend returns { course, lessons, progress }
+      if (data.course) {
+        setCourse(data.course);
       }
 
-      const { data: lessonsData } = await supabase
-        .from('lessons')
-        .select('*')
-        .eq('course_id', courseId)
-        .order('order_index', { ascending: true });
-
-      if (lessonsData) {
-        const { data: progressData } = await supabase
-          .from('lesson_progress')
-          .select('lesson_id, is_completed')
-          .eq('student_id', profile?.id)
-          .in('lesson_id', lessonsData.map(l => l.id));
-
-        const completedIds = new Set(
-          progressData?.filter(p => p.is_completed).map(p => p.lesson_id) || []
-        );
-
-        const lessonsWithProgress = lessonsData.map(lesson => ({
-          ...lesson,
-          is_completed: completedIds.has(lesson.id)
-        }));
-
-        setLessons(lessonsWithProgress);
-        setProgress(
-          lessonsData.length > 0
-            ? Math.round((completedIds.size / lessonsData.length) * 100)
-            : 0
-        );
+      if (data.lessons) {
+        setLessons(data.lessons);
       }
 
-      const { data: enrollment } = await supabase
-        .from('course_enrollments')
-        .select('*')
-        .eq('student_id', profile?.id)
-        .eq('course_id', courseId)
-        .maybeSingle();
-
-      if (!enrollment) {
-        await supabase.from('course_enrollments').insert({
-          student_id: profile?.id!,
-          course_id: courseId
-        });
+      if (typeof data.progress === 'number') {
+        setProgress(data.progress);
       }
     } catch (error) {
       console.error('Error loading course details:', error);

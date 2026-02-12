@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
 import { Search, Filter, Clock, BarChart } from 'lucide-react';
 
 interface Course {
@@ -16,7 +15,7 @@ interface Course {
 }
 
 export function CourseCatalog() {
-  const { profile } = useAuth();
+  // const { user } = useAuth(); // Profile might not be available yet, using user
   const [courses, setCourses] = useState<Course[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -32,27 +31,10 @@ export function CourseCatalog() {
 
   const loadCourses = async () => {
     try {
-      const { data: coursesData } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('is_published', true)
-        .order('created_at', { ascending: false });
-
-      if (coursesData) {
-        const { data: enrollments } = await supabase
-          .from('course_enrollments')
-          .select('course_id')
-          .eq('student_id', profile?.id);
-
-        const enrolledIds = new Set(enrollments?.map(e => e.course_id) || []);
-
-        const coursesWithEnrollment = coursesData.map(course => ({
-          ...course,
-          is_enrolled: enrolledIds.has(course.id)
-        }));
-
-        setCourses(coursesWithEnrollment);
-      }
+      const { data } = await api.get(`/courses/catalog?_t=${Date.now()}`);
+      // The backend should return { ...course, is_enrolled } joined already.
+      // Backend: getCourseCatalog returns rows with is_enrolled boolean.
+      setCourses(data);
     } catch (error) {
       console.error('Error loading courses:', error);
     } finally {
@@ -62,18 +44,11 @@ export function CourseCatalog() {
 
   const handleEnroll = async (courseId: string) => {
     try {
-      const { error } = await supabase
-        .from('course_enrollments')
-        .insert({
-          student_id: profile?.id!,
-          course_id: courseId
-        });
+      await api.post(`/courses/${courseId}/enroll`);
 
-      if (!error) {
-        setCourses(courses.map(c =>
-          c.id === courseId ? { ...c, is_enrolled: true } : c
-        ));
-      }
+      setCourses(courses.map(c =>
+        c.id === courseId ? { ...c, is_enrolled: true } : c
+      ));
     } catch (error) {
       console.error('Error enrolling:', error);
     }

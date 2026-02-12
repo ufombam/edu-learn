@@ -1,0 +1,12 @@
+Courses Table Structure:
+ - id: uuid (Nullable: NO)
+ - title: text (Nullable: NO)
+ - description: text (Nullable: YES)
+ - thumbnail_url: text (Nullable: YES)
+ - category: text (Nullable: YES)
+ - difficulty_level: USER-DEFINED (Nullable: YES)
+ - estimated_duration_hours: integer (Nullable: YES)
+ - is_published: boolean (Nullable: YES)
+ - created_by: uuid (Nullable: YES)
+ - created_at: timestamp with time zone (Nullable: YES)
+ - updated_at: timestamp with time zone (Nullable: YES)

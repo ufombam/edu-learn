@@ -80,9 +80,9 @@ export class VideoCallManager {
 
 export function checkWebRTCSupport(): boolean {
   return !!(
-    navigator.mediaDevices &&
-    navigator.mediaDevices.getUserMedia &&
-    window.RTCPeerConnection
+    (navigator as any).mediaDevices &&
+    (navigator as any).mediaDevices.getUserMedia &&
+    (window as any).RTCPeerConnection
   );
 }
 

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
 import { Plus, Edit2, Trash2, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { dummyLessons, mathsLessons, scienceLessons } from '../../utils/dummyLessons';
 
@@ -17,7 +16,6 @@ interface Course {
 }
 
 export function AdminCourseManagement() {
-  const { user } = useAuth();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
@@ -29,13 +27,8 @@ export function AdminCourseManagement() {
 
   const loadCourses = async () => {
     try {
-      const { data, error } = await supabase
-        .from('courses')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setCourses(data || []);
+      const { data } = await api.get(`/admin/courses?_t=${Date.now()}`);
+      setCourses(data);
     } catch (error) {
       console.error('Error loading courses:', error);
     } finally {
@@ -43,35 +36,28 @@ export function AdminCourseManagement() {
     }
   };
 
-  const togglePublish = async (courseId: string, isPublished: boolean) => {
+  const togglePublish = async (id: string, isPublished: boolean) => {
     try {
-      const { error } = await supabase
-        .from('courses')
-        .update({ is_published: !isPublished })
-        .eq('id', courseId);
+      await api.patch(`/admin/courses/${id}/publish`, {
+        is_published: !isPublished
+      });
 
-      if (error) throw error;
-      loadCourses();
+      setCourses(courses.map(c =>
+        c.id === id ? { ...c, is_published: !isPublished } : c
+      ));
     } catch (error) {
       console.error('Error updating course:', error);
-      alert('Failed to update course');
     }
   };
 
-  const deleteCourse = async (courseId: string) => {
+  const deleteCourse = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this course?')) return;
 
     try {
-      const { error } = await supabase
-        .from('courses')
-        .delete()
-        .eq('id', courseId);
-
-      if (error) throw error;
-      loadCourses();
+      await api.delete(`/admin/courses/${id}`);
+      setCourses(courses.filter(c => c.id !== id));
     } catch (error) {
       console.error('Error deleting course:', error);
-      alert('Failed to delete course');
     }
   };
 
@@ -80,22 +66,17 @@ export function AdminCourseManagement() {
     setSeeding(true);
 
     try {
-      for (let i = 0; i < lessons.length; i++) {
-        const lesson = lessons[i];
-        const { error } = await supabase.from('lessons').insert({
-          course_id: courseId,
-          title: lesson.title,
-          description: lesson.description,
-          content_type: lesson.contentType,
-          content_url: lesson.contentUrl || null,
-          content_text: lesson.contentText || null,
-          duration_minutes: lesson.duration,
-          is_downloadable: lesson.saveForOffline,
-          order_index: i
-        });
-
-        if (error) throw error;
-      }
+      await api.post(`/admin/courses/${courseId}/seed-lessons`, {
+        lessons: lessons.map((l, index) => ({
+          ...l,
+          content_type: l.contentType,
+          content_url: l.contentUrl,
+          content_text: l.contentText,
+          duration_minutes: l.duration,
+          is_downloadable: l.saveForOffline,
+          order_index: index
+        }))
+      });
 
       alert(`Successfully added ${lessons.length} lessons to the course!`);
       loadCourses();
@@ -155,11 +136,10 @@ export function AdminCourseManagement() {
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
                       <h3 className="text-lg font-semibold text-gray-900">{course.title}</h3>
-                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                        course.is_published
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${course.is_published
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                        }`}>
                         {course.is_published ? 'Published' : 'Draft'}
                       </span>
                       <span className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 capitalize">
@@ -202,8 +182,8 @@ export function AdminCourseManagement() {
                           course.category === 'Mathematics'
                             ? mathsLessons
                             : course.category === 'Science'
-                            ? scienceLessons
-                            : dummyLessons
+                              ? scienceLessons
+                              : dummyLessons
                         )}
                         disabled={seeding && seedingCourseId === course.id}
                         className="p-2 text-green-600 hover:bg-green-50 disabled:text-gray-400 disabled:hover:bg-transparent rounded-lg transition"

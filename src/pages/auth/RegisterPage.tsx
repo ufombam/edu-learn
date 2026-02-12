@@ -29,12 +29,11 @@ export function RegisterPage() {
 
     setLoading(true);
 
-    const { error } = await signUp(email, password, fullName, role);
-
-    if (error) {
-      setError(error.message);
-    } else {
+    try {
+      await signUp(email, password, fullName, role);
       setSuccess(true);
+    } catch (err: any) {
+      setError(err.message || 'Failed to create account');
     }
 
     setLoading(false);
@@ -86,11 +85,10 @@ export function RegisterPage() {
             <button
               type="button"
               onClick={() => setRole('student')}
-              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition ${
-                role === 'student'
+              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition ${role === 'student'
                   ? 'border-blue-600 bg-blue-50'
                   : 'border-gray-200 bg-white hover:border-gray-300'
-              }`}
+                }`}
             >
               <GraduationCap className="w-6 h-6 mb-2" />
               <span className="font-medium text-sm">Student</span>
@@ -98,11 +96,10 @@ export function RegisterPage() {
             <button
               type="button"
               onClick={() => setRole('mentor')}
-              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition ${
-                role === 'mentor'
+              className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition ${role === 'mentor'
                   ? 'border-blue-600 bg-blue-50'
                   : 'border-gray-200 bg-white hover:border-gray-300'
-              }`}
+                }`}
             >
               <Users className="w-6 h-6 mb-2" />
               <span className="font-medium text-sm">Mentor</span>
